@@ -44,6 +44,9 @@
 #include <set>
 #include <boost/multi_array.hpp>
 
+#include <pcl/point_types.h>
+#include <pcl/point_cloud.h>
+
 namespace rgbd_graph_segmentation
 {
 
@@ -51,7 +54,9 @@ namespace rgbd_graph_segmentation
 // TODO: just use cv::Point
 typedef std::pair<uint16_t, uint16_t> Pixel;
 
-// An object that represents a segmentation of an image
+typedef pcl::PointXYZRGBNormal PointType;
+
+/// An object that represents a segmentation of an image
 class Segmentation
 {
 public:
@@ -64,26 +69,29 @@ public:
   Segmentation (const cv::Mat_<cv::Vec3b>& image,
                 const array_type& segs);
 
-  // Which segment a given pixel belongs to
+  Segmentation (const pcl::PointCloud<PointType>::Ptr cloud,
+				const std::map<Pixel, uint32_t>& segs);
+
+  /// Which segment a given pixel belongs to
   inline
   uint32_t segmentContaining (const Pixel& p) const
   {
     return segments_[p.first][p.second];
   };
 
-  // List of pixels in a segment
+  /// List of pixels in a segment
   const std::vector<Pixel>& pixels (uint32_t seg) const;
   
-  // Get an image where each segment is assigned a random color
+  /// Get an image where each segment is assigned a random color
   cv::Mat_<cv::Vec3b> segmentationImage() const;
   
-  // Get the original image
+  /// Get the original image
   cv::Mat_<cv::Vec3b> image() const;
   
-  // List of segments
+  /// List of segments
   const std::set<uint32_t> segmentIds() const;
 
-  // Center (mean) of a segment
+  /// Center (mean) of a segment
   Pixel center (uint32_t seg) const;
   
 private:
@@ -96,12 +104,12 @@ private:
   std::map<uint32_t, std::vector<Pixel> > pixels_;
 };
 
-// Call Felzenszwalb's segmenter with the given parameters.
-// sigma is the initial smoothing width, the k parameter governs how likely 
-// things are to get combined during clustering (higher values mean larger
-// clusters), and min_size also governs cluster size, as a postprocessing step.
-// Edges will not be added between adjacent pixels whose depth difference
-// exceeds the depth threshold.
+/// Call Felzenszwalb's segmenter with the given parameters.
+/// sigma is the initial smoothing width, the k parameter governs how likely
+/// things are to get combined during clustering (higher values mean larger
+/// clusters), and min_size also governs cluster size, as a postprocessing step.
+/// Edges will not be added between adjacent pixels whose depth difference
+/// exceeds the depth threshold.
 Segmentation segment (const cv::Mat_<cv::Vec3b>& image,
                       const cv::Mat_<float>& depth_image,
                       float k = 1000,
@@ -109,6 +117,17 @@ Segmentation segment (const cv::Mat_<cv::Vec3b>& image,
                       float depth_threshold=.01,
                       float sigma = 0.5);
 
+/// Call Felzenszwalb's segmenter with the given parameters.
+/// sigma is the initial smoothing width, the k parameter governs how likely
+/// things are to get combined during clustering (higher values mean larger
+/// clusters), and min_size also governs cluster size, as a postprocessing step.
+/// Edges will not be added between adjacent pixels whose depth difference
+/// exceeds the depth threshold.
+Segmentation segment (const pcl::PointCloud<PointType>::Ptr cloud,
+					  float k = 1000,
+					  unsigned min_size = 500,
+					  float depth_threshold=.01,
+					  float sigma = 0.5);
 
 } // namespace
 

@@ -41,6 +41,9 @@
 
 #include "image.h"
 
+#include <pcl/point_types.h>
+#include <pcl/point_cloud.h>
+
 namespace felzenszwalb
 {
 
@@ -56,6 +59,9 @@ struct rgbd
 
 image<int>* segment_image(image<rgbd> *im, float sigma, float c, int min_size,
                           float depth_threshold, int *num_ccs);
+
+image<int>* segment_image(image<pcl::PointXYZRGBNormal> *im, float sigma, float c, int min_size,
+						  float depth_threshold, int *num_ccs);
 
 typedef image<rgbd> Img;
 

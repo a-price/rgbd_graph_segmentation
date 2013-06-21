@@ -65,6 +65,35 @@ Segmentation::Segmentation (const RgbImage& image, const array_type& segs) :
   }
 }
 
+Segmentation::Segmentation (const pcl::PointCloud<PointType>::Ptr cloud, const PixelMap& segs) :
+	segments_(boost::extents[cloud->height][cloud->width])
+{
+	// Initialize Image
+//	std::cerr << "before image:" << cloud->height << "," << cloud->width << std::endl;
+	image_.create(cloud->height, cloud->width);
+	for (unsigned r = 0; r < cloud->height; r++)
+	{
+		for (unsigned c = 0; c < cloud->width; c++)
+		{
+			PointType point = cloud->points[c + r * cloud->width];
+			cv::Vec3b color(point.b, point.g, point.r);
+			image_.at<cv::Vec3b>(r,c) = color;
+		}
+	}
+
+//	std::cerr << "before map" << std::endl;
+	// Initialize pixel map
+	for (const PixelMap::value_type& e : segs)
+	{
+	  // Add mapping from pixel to segment
+	  segments_[e.first.first][e.first.second] = e.second;
+
+	  // Add reverse mapping from segment id to pixel
+	  pixels_[e.second].push_back(e.first); // Creates map entry if doesn't exist
+	  segment_ids_.insert(e.second);
+	}
+}
+
 
 // Random color
 cv::Vec3b randomColor ()
@@ -273,3 +302,59 @@ Segmentation segment (const RgbImage& image,
 }
 
 } // namespace rgbd_graph_segmentation
+
+namespace rgbd_graph_segmentation
+{
+
+namespace f=felzenszwalb;
+
+//template <class T>
+Segmentation segment (const pcl::PointCloud<PointType>::Ptr cloud,
+					  float k, unsigned min_size,
+					  float depth_threshold, float sigma)
+{
+	std::cerr << "SA" << std::endl;
+	ROS_DEBUG_NAMED("felzenszwalb", "Converting image");
+
+	// Convert cloud to Felzenszwalb "image"
+	boost::shared_ptr< f::image<PointType> > img(new f::image<PointType>(cloud->width, cloud->height));
+	f::image<PointType>* res_ptr = img.get();
+	for (unsigned r = 0; r < cloud->height; r++)
+	{
+		for (unsigned c = 0; c < cloud->width; c++)
+		{
+			PointType point = cloud->points[c + r * cloud->width];
+			res_ptr->data[c + r * cloud->width] = point;
+		}
+	}
+std::cerr << "SB" << std::endl;
+	// Perform the Felzenszwalb segmentation
+	int num_comps;
+	boost::shared_ptr<f::image<int> > comps(segment_image(img.get(), sigma, k,
+														  min_size,
+														  depth_threshold,
+														  &num_comps));
+
+	std::cerr << "SC" << std::endl;
+	// Convert to Segmentation type
+	std::map<Pixel, uint32_t> res;
+	f::image<int>* comps_ptr = comps.get();
+
+	ROS_DEBUG_NAMED("felzenszwalb", "Converting segmentation");
+	for (int x=0; x<comps->width(); x++)
+	{
+		for (int y=0; y<comps->height(); y++)
+		{
+			res[Pixel(y,x)] = imRef(comps_ptr, x, y);
+		}
+	}
+std::cerr << "SD" << std::endl;
+	ROS_DEBUG_NAMED("felzenszwalb", "Indexing segmentation");
+	Segmentation s(cloud, res);
+	ROS_DEBUG_NAMED("felzenszwalb", "Segmentation complete");
+std::cerr << "SE" << std::endl;
+	return s;
+
+}
+} // namespace rgbd_graph_segmentation
+

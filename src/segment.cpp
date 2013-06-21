@@ -24,6 +24,7 @@ Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307 USA
 #include "segment-graph.h"
 #include "felz.h"
 
+
 namespace felzenszwalb
 {
 
@@ -163,5 +164,150 @@ image<int>* segment_image(image<rgbd> *im, float sigma, float c, int min_size,
   return output;
 }
 
-
 } // namespace
+
+
+#include <pcl/point_types.h>
+#include <pcl/point_cloud.h>
+
+namespace felzenszwalb
+{
+
+static inline Eigen::Matrix<float, 9, 1> getParamVector(pcl::PointXYZRGBNormal p)
+{
+	Eigen::Matrix<float, 9, 1> p_vec;
+	p_vec << p.getVector3fMap()/10 , p.getRGBVector3i().cast<float>()/255.0 /3.0 , p.getNormalVector3fMap().normalized() * 10.0;
+	//p_vec << p.getVector3fMap() , p.getRGBVector3i().cast<float>()/255.0 , p.getNormalVector3fMap().normalized() * 10.0;
+	return p_vec;
+}
+
+static float diff(pcl::PointXYZRGBNormal& a, pcl::PointXYZRGBNormal& b)
+{
+	Eigen::VectorXf a_vec = getParamVector(a);
+	Eigen::VectorXf b_vec = getParamVector(b);
+	return (a_vec - b_vec).norm();
+}
+
+struct pclDepthEdgeFinder
+{
+	pclDepthEdgeFinder (image<pcl::PointXYZRGBNormal>* im, float depth_threshold) :
+		im(im), t(depth_threshold)
+	{}
+
+	bool operator() (int x, int y, int x2, int y2) const
+	{
+		Eigen::Vector3f p1 = imRef(im, x, y).getVector3fMap();
+		Eigen::Vector3f p2 = imRef(im, x2, y2).getVector3fMap();
+		if (!std::isfinite(p1.x()))
+			return std::isfinite(p2.x());
+		else if (!std::isfinite(p2.x()))
+			return true;
+		else return (p1-p2).norm()>t;
+	}
+
+	image<pcl::PointXYZRGBNormal>* im;
+	float t;
+};
+
+/*
+ * Segment an rgbd image
+ *
+ * Returns a color image representing the segmentation.
+ *
+ * im: image to segment.
+ * sigma: to smooth the image.
+ * c: constant for threshold function.
+ * min_size: minimum component size (enforced by post-processing stage).
+ * num_ccs: number of connected components in the segmentation.
+ * depth_threshold: we won't consider a pair of pixels if the depth difference
+ * exceeds this
+ */
+image<int>* segment_image(image<pcl::PointXYZRGBNormal>* im, float sigma, float c, int min_size,
+						  float depth_threshold, int *num_ccs) {
+	int width = im->width();
+	int height = im->height();
+
+	pclDepthEdgeFinder depth_edge(im, depth_threshold);
+
+	// build graph
+	edge *edges = new edge[width*height*4];
+	int num = 0;
+	for (int y = 0; y < height; y++)
+	{
+		for (int x = 0; x < width; x++)
+		{
+			int a = y * width + x;
+			// Check to the right
+			if (x < width-1 && !depth_edge(x, y, x+1, y))
+			{
+				int b = y * width + (x+1);
+				edges[num].a = a;
+				edges[num].b = b;
+				edges[num].w = diff(im->data[a], im->data[b]);
+				num++;
+			}
+
+			// Check down
+			if (y < height-1 && !depth_edge(x, y, x, y+1))
+			{
+				int b = (y+1) * width + x;
+				edges[num].a = a;
+				edges[num].b = b;
+				edges[num].w = diff(im->data[a], im->data[b]);
+				num++;
+			}
+
+			// Check down+right
+			if ((x < width-1) && (y<height-1) && !depth_edge(x, y, x+1, y+1))
+			{
+				int b = (y+1) * width + (x+1);
+				edges[num].a = a;
+				edges[num].b = b;
+				edges[num].w = diff(im->data[a], im->data[b]);
+				num++;
+			}
+
+			// Check down+left
+			if ((x < width-1) && (y>0) && !depth_edge(x, y, x+1, y-1))
+			{
+				int b = (y-1) * width + (x+1);
+				edges[num].a = a;
+				edges[num].b = b;
+				edges[num].w = diff(im->data[a], im->data[b]);
+				num++;
+			}
+		}
+	}
+
+	// segment
+	universe *u = segment_graph(width*height, num, edges, c);
+
+	// post process small components
+	for (int i = 0; i < num; i++)
+	{
+		int a = u->find(edges[i].a);
+		int b = u->find(edges[i].b);
+		if ((a != b) &&
+				((u->size(a) < min_size) || (u->size(b) < min_size)))
+			u->join(a, b);
+	}
+	delete [] edges;
+	*num_ccs = u->num_sets();
+
+	image<int> *output = new image<int>(width, height);
+
+	for (int y = 0; y < height; y++)
+	{
+		for (int x = 0; x < width; x++)
+		{
+			int comp = u->find(y * width + x);
+			imRef(output, x, y) = comp;
+		}
+	}
+
+	delete u;
+
+	return output;
+}
+
+}
